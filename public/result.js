@@ -12,7 +12,7 @@ chart(47.14)
   		// console.log("the form has beeen submitted");
 
   	// grab values
-  	RETIRE  = $('input[name="RETIRE"]').val();
+  	RETIRE  = $('input[name="RETIRE"]:checked').val();
   	MORTGAGE = $('input[name="MORTGAGE"]:checked').val();
 	LOC = $('input[name="LOC"]:checked').val();
 	GENDER = $('input[name="GENDER"]:checked').val();

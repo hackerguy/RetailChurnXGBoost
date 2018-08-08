@@ -18,19 +18,45 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 var request = require('request');
 
-var service_path = 'https://ibm-watson-ml.mybluemix.net'
-var username = '4be82790-d71b-4c9f-ac4e-5af3c4b9c9b1'
-var password = '47571902-8632-47e8-9590-323f49975136'
-var token_path = '/v3/identity/token'
+var service_path = 'https://ibm-watson-ml.mybluemix.net';
+var wml_username = process.env.wml_username;
+var wml_password = process.env.wml_password;
+var token_path = '/v3/identity/token';
+
+console.log('WML username = ' + process.env.wml_username);
+console.log('WML password = ' + process.env.wml_password);
+
+const PGUSER = process.env.pg_user;
+const PGHOST = (process.env.POSTGRES_RELEASE_POSTGRESQL_SERVICE_HOST || 'localhost');;
+const PGPASSWORD = process.env.pg_password;
+const PGDATABASE = 'churndb';
+const PGPORT = (process.env.POSTGRES_RELEASE_POSTGRESQL_SERVICE_PORT || 5432);
+
+console.log('postgres host = ' + PGHOST);
+console.log('postgres port = ' + PGPORT);
+console.log('postgres user = ' + PGUSER);
+console.log('postgres password = ' + PGPASSWORD);
 
 
-function tokenGet(username, password, service_path, token_path, loadCallback, errorCallback){
+const { Pool, Client } = require('pg')
+const pool = new Pool({
+  user: PGUSER,
+  host: PGHOST,
+  database: PGDATABASE,
+  password: PGPASSWORD,
+  port: PGPORT,
+});
+const client = new Client()
+
+
+
+function tokenGet(wml_username, wml_password, service_path, token_path, loadCallback, errorCallback){
   request({
     method: "GET",
     url: service_path + token_path,
     auth: {
-      'user': username,
-      'pass': password
+      'user': wml_username,
+      'pass': wml_password
       }
     },
     function(error, response, body){
@@ -67,8 +93,6 @@ function score(scoring_url, token, payload, loadCallback, errorCallback){
     });
 }
 
-// tokenGet(service_path, username, password, token_path)
-
 
 
 app.get('/', function(req, res){
@@ -87,9 +111,10 @@ app.post('/', function (req, res) {
   Frequency_score = Number(req.body.Frequency_score)
 
   //console.log(typeof RETIRE);
-  //console.log(payload)
 
-tokenGet(username, password, service_path, token_path,
+
+
+tokenGet(wml_username, wml_password, service_path, token_path,
     function (token) {
       //console.log(token);
 
@@ -123,6 +148,8 @@ tokenGet(username, password, service_path, token_path,
           ]
         };
 
+        console.log(payload)
+
 
       var scoring_url = "/v3/wml_instances/d360e86c-6ddd-45f7-a908-d1ebf83a211d/deployments/bc639f91-8694-489b-8517-d7d3dcde368d/online";
 
@@ -133,6 +160,42 @@ tokenGet(username, password, service_path, token_path,
               console.log(prediction);
               console.log(probability);
               // res.render("index", { scoreResponse: scoreResponse, prediction:prediction, probability: probability })
+
+              pool.connect((err, client, done) => {
+
+                const shouldAbort = (err) => {
+                  if (err) {
+                    console.error('Error in transaction', err.stack)
+                    client.query('ROLLBACK', (err) => {
+                      if (err) {
+                        console.error('Error rolling back client', err.stack)
+                      }
+                      // release the client back to the pool
+                      done()
+                    })
+                  }
+                  return !!err
+                }
+
+                client.query('BEGIN', (err) => {
+                  if (shouldAbort(err)) return
+
+                  const insertText = 'INSERT INTO churn.churn(Retire, Mortgage, LOC, GENDER, CHILDREN, WORKING, HighMonVal ,AgeRange, Frequency_score, prediction, probability) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)'
+                  const insertValues = [RETIRE, MORTGAGE, LOC, GENDER, CHILDREN, WORKING, HighMonVal ,AgeRange, Frequency_score, prediction, probability.toFixed(5)]
+                  client.query(insertText, insertValues, (err, res) => {
+                    if (shouldAbort(err)) return
+
+                    client.query('COMMIT', (err) => {
+                      if (err) {
+                        console.error('Error committing transaction', err.stack)
+                      }
+                      done()
+                    })
+                  })
+                })
+              })
+
+
       }, function (error) {
         console.log(error);
       });
